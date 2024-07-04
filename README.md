@@ -1,1 +1,1 @@
-# GK_LAB_10
+Podstawy WebGL/GLSL
