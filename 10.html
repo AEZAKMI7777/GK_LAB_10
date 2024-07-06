@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<meta charset="UTF-8">
+<html>
+<head>
+<title>WebGL Intro</title>
+<style>
+    html, body {
+        margin: 0;
+        overflow: hidden;
+    }
+    canvas {
+        display: block;
+    }
+</style>
+
+<script type="x-shader/x-vertex" id="vertex-shader">
+    attribute vec2 a_coords;
+    attribute vec3 a_color;
+    
+    uniform float u_width;
+    uniform float u_height;
+    uniform float u_pointSize;
+    uniform int u_shapeType;
+    
+    varying vec3 v_color;
+    varying float v_shapeType;
+    
+    void main() {
+        float x = a_coords.x / u_width * 2.0 - 1.0;
+        float y = 1.0 - a_coords.y / u_height * 2.0;
+        gl_Position = vec4(x, y, 0.0, 1.0);
+        gl_PointSize = u_pointSize;
+        v_color = a_color;
+        v_shapeType = float(u_shapeType);
+    }
+</script>
+
+<script type="x-shader/x-fragment" id="fragment-shader">
+    precision mediump float;
+
+    varying vec3 v_color;
+    varying float v_shapeType;
+
+    const float PI = 3.14159;
+
+    float polygon(float sides, float radius, vec2 pos) {
+        float angle = atan(pos.x, pos.y);
+        angle -= floor(angle / PI / 2.0 * sides) / sides * PI * 2.0 - PI / sides;
+        return cos(angle) * length(pos) < radius ? 1.0 : 0.0;
+    }
+
+    void main() {
+        float dist = distance(vec2(0.5), gl_PointCoord);
+        gl_FragColor = vec4(v_color, 1.0);
+        if (v_shapeType > 4.0) {
+            if (dist > polygon(v_shapeType, 0.4, gl_PointCoord - vec2(0.5))) {
+                discard;
+            }
+        }
+    }
+</script>
+
+<script>
+"use strict";
+
+let canvas, gl;
+let u_width_loc, u_height_loc, u_pointSize_loc, a_coords_loc, a_color_loc, u_shapeType_loc;
+let a_coords_buffer, a_color_buffer;
+const POINT_COUNT = 30;
+const POINT_SIZE = 64;
+
+let positions = new Float32Array(2 * POINT_COUNT);
+let velocities = new Float32Array(2 * POINT_COUNT);
+let colors = new Float32Array(3 * POINT_COUNT);
+
+let vertices = 6;
+let shapeType = 0;
+let randomizeColors = false;
+let isRunning = true;
+
+function init() {
+    canvas = document.createElement("canvas");
+    document.body.appendChild(canvas);
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    gl = canvas.getContext("webgl");
+    if (!gl) {
+        alert("WebGL not supported");
+        return;
+    }
+
+    window.addEventListener("resize", resize);
+    canvas.addEventListener("mousedown", handleMouse);
+    document.addEventListener("keydown", handleKey);
+
+    setupShaders();
+    setupBuffers();
+    createData();
+    requestAnimationFrame(renderLoop);
+}
+
+function setupShaders() {
+    const vertexShaderSource = document.getElementById("vertex-shader").textContent;
+    const fragmentShaderSource = document.getElementById("fragment-shader").textContent;
+
+    const vertexShader = createShader(gl.VERTEX_SHADER, vertexShaderSource);
+    const fragmentShader = createShader(gl.FRAGMENT_SHADER, fragmentShaderSource);
+
+    const program = createProgram(vertexShader, fragmentShader);
+    gl.useProgram(program);
+
+    u_width_loc = gl.getUniformLocation(program, "u_width");
+    u_height_loc = gl.getUniformLocation(program, "u_height");
+    u_pointSize_loc = gl.getUniformLocation(program, "u_pointSize");
+    u_shapeType_loc = gl.getUniformLocation(program, "u_shapeType");
+
+    a_coords_loc = gl.getAttribLocation(program, "a_coords");
+    a_color_loc = gl.getAttribLocation(program, "a_color");
+
+    gl.uniform1f(u_width_loc, canvas.width);
+    gl.uniform1f(u_height_loc, canvas.height);
+    gl.uniform1f(u_pointSize_loc, POINT_SIZE);
+    gl.uniform1i(u_shapeType_loc, vertices);
+}
+
+function setupBuffers() {
+    a_coords_buffer = gl.createBuffer();
+    a_color_buffer = gl.createBuffer();
+}
+
+function createShader(type, source) {
+    const shader = gl.createShader(type);
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        throw new Error(gl.getShaderInfoLog(shader));
+    }
+    return shader;
+}
+
+function createProgram(vertexShader, fragmentShader) {
+    const program = gl.createProgram();
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        throw new Error(gl.getProgramInfoLog(program));
+    }
+    return program;
+}
+
+function createData() {
+    for (let i = 0; i < POINT_COUNT; i++) {
+        positions[2 * i] = canvas.width / 2;
+        positions[2 * i + 1] = canvas.height / 2;
+        const speed = 2 + 4 * Math.random();
+        const angle = 2 * Math.PI * Math.random();
+        velocities[2 * i] = speed * Math.sin(angle);
+        velocities[2 * i + 1] = speed * Math.cos(angle);
+    }
+
+    randomizeColors ? randomizeColorsData() : setFixedColor();
+}
+
+function randomizeColorsData() {
+    for (let i = 0; i < colors.length; i++) {
+        colors[i] = Math.random();
+    }
+}
+
+function setFixedColor() {
+    for (let i = 0; i < POINT_COUNT; i++) {
+        colors[3 * i] = 1.0;
+        colors[3 * i + 1] = 0.0;
+        colors[3 * i + 2] = 0.0;
+    }
+}
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.uniform1f(u_width_loc, canvas.width);
+    gl.uniform1f(u_height_loc, canvas.height);
+}
+
+function handleMouse(evt) {
+    if (evt.shiftKey) {
+        createData();
+    } else {
+        const x = evt.clientX;
+        const y = evt.clientY;
+        for (let i = 0; i < POINT_COUNT; i++) {
+            const dx = x - positions[2 * i];
+            const dy = y - positions[2 * i + 1];
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > 0.1) {
+                const speed = Math.sqrt(velocities[2 * i] * velocities[2 * i] + velocities[2 * i + 1] * velocities[2 * i + 1]);
+                velocities[2 * i] = dx / dist * speed;
+                velocities[2 * i + 1] = dy / dist * speed;
+            }
+        }
+    }
+}
+
+function handleKey(evt) {
+    switch (evt.keyCode) {
+        case 49: // '1'
+            randomizeColors = !randomizeColors;
+            randomizeColors ? randomizeColorsData() : setFixedColor();
+            break;
+        case 50: // '2'
+            shapeType = shapeType === 6 ? 4 : 6;
+            gl.uniform1i(u_shapeType_loc, shapeType);
+            break;
+        case 51: // '3'
+            shapeType = shapeType === 0 ? 2 : 0;
+            gl.uniform1i(u_shapeType_loc, shapeType);
+            break;
+        case 32: // Space
+            isRunning = !isRunning;
+            if (isRunning) requestAnimationFrame(renderLoop);
+            break;
+    }
+}
+
+function updateData() {
+    for (let i = 0; i < POINT_COUNT; i++) {
+        positions[2 * i] += velocities[2 * i];
+        positions[2 * i + 1] += velocities[2 * i + 1];
+
+        if (positions[2 * i] < POINT_SIZE / 2 || positions[2 * i] > canvas.width - POINT_SIZE / 2) {
+            velocities[2 * i] = -velocities[2 * i];
+        }
+
+        if (positions[2 * i + 1] < POINT_SIZE / 2 || positions[2 * i + 1] > canvas.height - POINT_SIZE / 2) {
+            velocities[2 * i + 1] = -velocities[2 * i + 1];
+        }
+    }
+}
+
+function render() {
+    gl.clear(gl.COLOR_BUFFER_BIT);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, a_coords_buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STREAM_DRAW);
+    gl.vertexAttribPointer(a_coords_loc, 2, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(a_coords_loc);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, a_color_buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, colors, gl.STATIC_DRAW);
+    gl.vertexAttribPointer(a_color_loc, 3, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(a_color_loc);
+
+    gl.drawArrays(shapeType === 0 ? gl.POINTS : gl.LINE_LOOP, 0, POINT_COUNT);
+}
+
+function renderLoop() {
+    if (isRunning) {
+        updateData();
+        render();
+        requestAnimationFrame(renderLoop);
+    }
+}
+
+window.onload = init;
+</script>
+</head>
+<body>
+</body>
+</html>
